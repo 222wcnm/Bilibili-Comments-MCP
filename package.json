@@ -1,0 +1,39 @@
+{
+  "name": "bilibili-comments-mcp",
+  "version": "1.0.0",
+  "description": "基于 Model Context Protocol (MCP) 的 B 站视频与动态评论获取工具",
+  "type": "module",
+  "bin": {
+    "bilibili-comments-mcp": "./src/index.js"
+  },
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "mcp",
+    "bilibili",
+    "claude"
+  ],
+  "author": "",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/ tests/",
+    "format": "prettier --write src/ tests/"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "axios": "^1.10.0",
+    "p-limit": "^7.1.1"
+  },
+  "devDependencies": {
+    "eslint": "^10.0.1",
+    "prettier": "^3.8.1",
+    "vitest": "^4.0.18"
+  }
+}
