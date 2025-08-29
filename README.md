@@ -47,7 +47,7 @@ npm install @modelcontextprotocol/sdk axios
 **参数：**
 - `bvid` / `aid` - 视频ID（二选一）
 - `page` - 页码，默认1
-- `pageSize` - 每页数量（1-49），默认20
+- `pageSize` - 每页数量（1-20），默认20
 - `sort` - 排序：0按时间，1按热度
 - `includeReplies` - 是否包含楼中楼回复，默认true
 - `outputFormat` - 输出格式：markdown 或 json，默认markdown
@@ -83,7 +83,7 @@ npm install @modelcontextprotocol/sdk axios
 **参数：**
 - `dynamic_id` - 动态ID（必需）
 - `page` - 页码，默认1
-- `pageSize` - 每页数量（1-49），默认20
+- `pageSize` - 每页数量（1-20），默认20
 - `includeReplies` - 是否包含楼中楼回复，默认true
 - `outputFormat` - 输出格式：markdown 或 json，默认markdown
 - `cookie` - B站Cookie（可选）

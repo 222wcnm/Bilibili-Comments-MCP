@@ -206,7 +206,7 @@ class BilibiliMCPServer {
               bvid: { type: "string", description: "B 站视频 BV 号（与 aid 二选一）" },
               aid: { type: "string", description: "B 站视频 AV 号（与 bvid 二选一）" },
               page: { type: "number", default: 1, description: "页码，默认为 1" },
-              pageSize: { type: "number", default: 20, description: "每页数量，范围 1-49，默认 20" },
+              pageSize: { type: "number", default: 20, description: "每页数量，范围 1-20，默认 20" },
               sort: { type: "number", default: 0, description: "排序方式: 0 按时间，1 按热度" },
               includeReplies: { type: "boolean", default: true, description: "是否包含楼中楼回复" },
               outputFormat: { type: "string", default: "markdown", description: "输出格式: markdown 或 json" },
@@ -221,7 +221,7 @@ class BilibiliMCPServer {
             properties: {
               dynamic_id: { type: "string", description: "B 站动态 ID" },
               page: { type: "number", default: 1, description: "页码，默认为 1" },
-              pageSize: { type: "number", default: 20, description: "每页数量，范围 1-49，默认 20" },
+              pageSize: { type: "number", default: 20, description: "每页数量，范围 1-20，默认 20" },
               includeReplies: { type: "boolean", default: true, description: "是否包含楼中楼回复" },
               outputFormat: { type: "string", default: "markdown", description: "输出格式: markdown 或 json" },
               cookie: { type: "string", description: "B 站 Cookie（可选）。如果已设置环境变量，则无需提供。" }
@@ -297,7 +297,7 @@ class BilibiliMCPServer {
         throw new McpError(ErrorCode.InvalidParams, "必须提供有效的 B 站 Cookie。请通过参数传入或设置 BILIBILI_SESSDATA 环境变量。");
       }
       if (!bvid && !aid) throw new McpError(ErrorCode.InvalidParams, "必须提供 bvid 或 aid 之一");
-      if (pageSize < 1 || pageSize > 49) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-49 之间");
+      if (pageSize < 1 || pageSize > 20) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-20 之间");
       if (![0, 1].includes(sort)) throw new McpError(ErrorCode.InvalidParams, "sort 必须是 0 或 1");
       if (!["markdown", "json"].includes(outputFormat)) throw new McpError(ErrorCode.InvalidParams, "outputFormat 必须是 markdown 或 json");
 
@@ -362,7 +362,7 @@ class BilibiliMCPServer {
         throw new McpError(ErrorCode.InvalidParams, "必须提供有效的 B 站 Cookie。请通过参数传入或设置 BILIBILI_SESSDATA 环境变量。");
       }
       if (!dynamic_id) throw new McpError(ErrorCode.InvalidParams, "必须提供 dynamic_id");
-      if (pageSize < 1 || pageSize > 49) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-49 之间");
+      if (pageSize < 1 || pageSize > 20) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-20 之间");
       if (!["markdown", "json"].includes(outputFormat)) throw new McpError(ErrorCode.InvalidParams, "outputFormat 必须是 markdown 或 json");
 
       // 2. 获取评论数据
