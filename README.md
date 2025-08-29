@@ -42,24 +42,60 @@ npm install @modelcontextprotocol/sdk axios
 ## 工具功能
 
 ### `get_video_comments`
-获取 B 站视频评论，支持分页和楼中楼回复。
+获取 B 站视频评论，支持分页、排序和楼中楼回复。
 
 **参数：**
 - `bvid` / `aid` - 视频ID（二选一）
 - `page` - 页码，默认1
 - `pageSize` - 每页数量（1-49），默认20
-- `sort` - 排序：0时间，1热度
-- `includeReplies` - 是否包含楼中楼，默认true
+- `sort` - 排序：0按时间，1按热度
+- `includeReplies` - 是否包含楼中楼回复，默认true
+- `outputFormat` - 输出格式：markdown 或 json，默认markdown
 - `cookie` - B站Cookie（可选）
 
-**示例：**
+**示例（Markdown格式）：**
 ```javascript
 {
   "bvid": "BV1xx411c7mD",
   "page": 1,
   "pageSize": 20,
   "sort": 1,
-  "includeReplies": true
+  "includeReplies": true,
+  "outputFormat": "markdown"
+}
+```
+
+**示例（JSON格式）：**
+```javascript
+{
+  "bvid": "BV1xx411c7mD",
+  "page": 1,
+  "pageSize": 20,
+  "sort": 0,
+  "includeReplies": false,
+  "outputFormat": "json"
+}
+```
+
+### `get_dynamic_comments`
+获取 B 站动态评论，支持分页和楼中楼回复。
+
+**参数：**
+- `dynamic_id` - 动态ID（必需）
+- `page` - 页码，默认1
+- `pageSize` - 每页数量（1-49），默认20
+- `includeReplies` - 是否包含楼中楼回复，默认true
+- `outputFormat` - 输出格式：markdown 或 json，默认markdown
+- `cookie` - B站Cookie（可选）
+
+**示例：**
+```javascript
+{
+  "dynamic_id": "123456789",
+  "page": 1,
+  "pageSize": 10,
+  "includeReplies": true,
+  "outputFormat": "markdown"
 }
 ```
 
