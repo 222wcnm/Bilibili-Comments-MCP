@@ -106,7 +106,3 @@ npm install @modelcontextprotocol/sdk axios
 3. 切换到 Network 标签
 4. 刷新页面，找到任意请求
 5. 复制 Request Headers 中的 Cookie 值
-
-## 相关链接
-
-https://github.com/SocialSisterYi/bilibili-API-collect
