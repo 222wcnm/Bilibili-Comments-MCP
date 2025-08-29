@@ -5,6 +5,8 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ErrorCode,
+  McpError
 } = require("@modelcontextprotocol/sdk/types.js");
 const axios = require("axios");
 
@@ -66,6 +68,7 @@ class BilibiliAPI {
       view: "https://api.bilibili.com/x/web-interface/view",
       reply: "https://api.bilibili.com/x/v2/reply",
       replyReply: "https://api.bilibili.com/x/v2/reply/reply",
+      dynamicReply: "https://api.bilibili.com/x/v2/reply",
     };
   }
 
@@ -86,12 +89,12 @@ class BilibiliAPI {
       });
 
       if (response.data.code !== 0) {
-        throw new Error(`获取视频信息失败 (${response.data.code}): ${response.data.message}`);
+        throw new McpError(ErrorCode.InternalError, `获取视频信息失败 (${response.data.code}): ${response.data.message}`);
       }
       
       return { aid: response.data.data.aid, title: response.data.data.title };
     } catch (error) {
-      throw new Error(`获取视频信息失败: ${error.message || "未知网络错误"}`);
+      throw new McpError(ErrorCode.InternalError, `获取视频信息失败: ${error.message || "未知网络错误"}`);
     }
   }
 
@@ -116,8 +119,8 @@ class BilibiliAPI {
       });
       return response;
     } catch (error) {
-      if (error.code === 'ECONNABORTED') throw new Error("请求超时，请稍后重试");
-      throw new Error(`获取主评论失败: ${error.message || "未知网络错误"}`);
+      if (error.code === 'ECONNABORTED') throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
+      throw new McpError(ErrorCode.InternalError, `获取主评论失败: ${error.message || "未知网络错误"}`);
     }
   }
 
@@ -148,6 +151,30 @@ class BilibiliAPI {
       // 捕获任何错误（网络、超时等），返回一个特定标识以便上层处理
       console.error(`获取楼中楼失败 (rpid: ${parentRpid}):`, error.message);
       return 'fetch_failed';
+    }
+  }
+
+  /**
+   * 获取动态的主评论列表。
+   * @param {string} dynamicId - 动态 ID。
+   * @param {number} page - 评论页码。
+   * @param {number} pageSize - 每页评论数量。
+   * @param {string} cookie - 用户的 Bilibili Cookie。
+   * @returns {Promise<import('axios').AxiosResponse<any, any>>} - axios 的原始响应对象。
+   */
+  async fetchDynamicComments(dynamicId, page, pageSize, cookie) {
+    try {
+      const response = await this.axiosInstance.get(this.apiEndpoints.dynamicReply, {
+        params: { type: 17, oid: dynamicId, pn: page, ps: Math.min(pageSize, 49) },
+        headers: {
+          "Cookie": cookie,
+          "Referer": `https://t.bilibili.com/${dynamicId}`,
+        },
+      });
+      return response;
+    } catch (error) {
+      if (error.code === 'ECONNABORTED') throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
+      throw new McpError(ErrorCode.InternalError, `获取动态评论失败: ${error.message || "未知网络错误"}`);
     }
   }
 }
@@ -192,6 +219,20 @@ class BilibiliMCPServer {
               cookie: { type: "string", description: "B 站 Cookie（可选）。如果已设置环境变量，则无需提供。" }
             },
           }
+        }, {
+          name: "get_dynamic_comments",
+          description: "获取 B 站动态的评论内容，支持分页和楼中楼回复。注意：需要有效的 B 站 Cookie 才能正常工作。",
+          inputSchema: {
+            type: "object",
+            properties: {
+              dynamic_id: { type: "string", description: "B 站动态 ID" },
+              page: { type: "number", default: 1, description: "页码，默认为 1" },
+              pageSize: { type: "number", default: 20, description: "每页数量，范围 1-49，默认 20" },
+              includeReplies: { type: "boolean", default: true, description: "是否包含楼中楼回复" },
+              cookie: { type: "string", description: "B 站 Cookie（可选）。如果已设置环境变量，则无需提供。" }
+            },
+            required: ["dynamic_id"]
+          }
         }]
       };
     });
@@ -201,7 +242,10 @@ class BilibiliMCPServer {
       if (request.params.name === "get_video_comments") {
         return await this.getVideoComments(request.params.arguments);
       }
-      throw new Error(`未知的工具: ${request.params.name}`);
+      if (request.params.name === "get_dynamic_comments") {
+        return await this.getDynamicComments(request.params.arguments);
+      }
+      throw new McpError(ErrorCode.MethodNotFound, `未知的工具: ${request.params.name}`);
     });
   }
   
@@ -215,6 +259,35 @@ class BilibiliMCPServer {
   }
 
   /**
+   * 从 SESSDATA 构建完整的 Cookie 字符串
+   * @param {string} sessdata - SESSDATA 值
+   * @returns {string} 完整的 Cookie 字符串
+   */
+  buildCookieFromSessdata(sessdata) {
+    return `SESSDATA=${sessdata}`;
+  }
+
+  /**
+   * 获取有效的 Cookie，仅支持 SESSDATA 环境变量
+   * @param {string} cookieParam - 传入的 cookie 参数
+   * @returns {string|null} 有效的 Cookie 字符串或 null
+   */
+  getValidCookie(cookieParam) {
+    // 优先使用传入的 cookie 参数
+    if (cookieParam && this.validateCookie(cookieParam)) {
+      return cookieParam;
+    }
+    
+    // 检查 BILIBILI_SESSDATA 环境变量
+    const sessdata = process.env.BILIBILI_SESSDATA;
+    if (sessdata && typeof sessdata === 'string' && sessdata.trim()) {
+      return this.buildCookieFromSessdata(sessdata.trim());
+    }
+    
+    return null;
+  }
+
+  /**
    * `get_video_comments` 工具的核心执行函数。
    * @param {object} args - 从 LLM 客户端传来的参数。
    * @returns {Promise<{content: [{type: string, text: string}]}>} - MCP 格式的返回结果。
@@ -223,14 +296,14 @@ class BilibiliMCPServer {
     try {
       // 1. 参数校验与准备
       const { bvid, aid, page = 1, pageSize = 20, sort = 0, includeReplies = true } = args;
-      const cookie = args.cookie || process.env.BILIBILI_COOKIE;
+      const cookie = this.getValidCookie(args.cookie);
 
-      if (!this.validateCookie(cookie)) {
-        throw new Error("必须提供有效的 B 站 Cookie。请通过参数传入或设置 BILIBILI_COOKIE 环境变量。");
+      if (!cookie) {
+        throw new McpError(ErrorCode.InvalidParams, "必须提供有效的 B 站 Cookie。请通过参数传入或设置 BILIBILI_SESSDATA 环境变量。");
       }
-      if (!bvid && !aid) throw new Error("必须提供 bvid 或 aid 之一");
-      if (pageSize < 1 || pageSize > 49) throw new Error("pageSize 必须在 1-49 之间");
-      if (![0, 1].includes(sort)) throw new Error("sort 必须是 0 或 1");
+      if (!bvid && !aid) throw new McpError(ErrorCode.InvalidParams, "必须提供 bvid 或 aid 之一");
+      if (pageSize < 1 || pageSize > 49) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-49 之间");
+      if (![0, 1].includes(sort)) throw new McpError(ErrorCode.InvalidParams, "sort 必须是 0 或 1");
 
       // 2. 获取评论数据
       const videoIdForRef = bvid || `av${aid}`;
@@ -248,7 +321,7 @@ class BilibiliMCPServer {
         if (response.data.code === -101) errorMsg = "账号未登录或 Cookie 已过期";
         else if (response.data.code === -403) errorMsg = "访问权限不足";
         else if (response.data.code === -404) errorMsg = "视频不存在或已被删除";
-        throw new Error(`B 站 API 错误 (${response.data.code}): ${errorMsg}`);
+        throw new McpError(ErrorCode.InternalError, `B 站 API 错误 (${response.data.code}): ${errorMsg}`);
       }
 
       // 3. 将数据格式化为 Markdown 报告
@@ -264,6 +337,49 @@ class BilibiliMCPServer {
     } catch (error) {
       // 统一处理流程中发生的任何错误
       return { content: [{ type: "text", text: `❌ 获取评论失败: ${error.message}` }] };
+    }
+  }
+
+  /**
+   * `get_dynamic_comments` 工具的核心执行函数。
+   * @param {object} args - 从 LLM 客户端传来的参数。
+   * @returns {Promise<{content: [{type: string, text: string}]}>} - MCP 格式的返回结果。
+   */
+  async getDynamicComments(args) {
+    try {
+      // 1. 参数校验与准备
+      const { dynamic_id, page = 1, pageSize = 20, includeReplies = true } = args;
+      const cookie = this.getValidCookie(args.cookie);
+
+      if (!cookie) {
+        throw new McpError(ErrorCode.InvalidParams, "必须提供有效的 B 站 Cookie。请通过参数传入或设置 BILIBILI_SESSDATA 环境变量。");
+      }
+      if (!dynamic_id) throw new McpError(ErrorCode.InvalidParams, "必须提供 dynamic_id");
+      if (pageSize < 1 || pageSize > 49) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-49 之间");
+
+      // 2. 获取评论数据
+      const response = await this.bilibiliAPI.fetchDynamicComments(dynamic_id, page, pageSize, cookie);
+      
+      if (response.data.code !== 0) {
+        let errorMsg = response.data.message;
+        if (response.data.code === -101) errorMsg = "账号未登录或 Cookie 已过期";
+        else if (response.data.code === -403) errorMsg = "访问权限不足";
+        else if (response.data.code === -404) errorMsg = "动态不存在或已被删除";
+        throw new McpError(ErrorCode.InternalError, `B 站 API 错误 (${response.data.code}): ${errorMsg}`);
+      }
+
+      // 3. 将数据格式化为 Markdown 报告
+      const markdownResponse = await this.generateDynamicMarkdownResponse(
+        response.data.data, 
+        includeReplies, 
+        cookie, 
+        dynamic_id
+      );
+
+      return { content: [{ type: "text", text: markdownResponse }] };
+    } catch (error) {
+      // 统一处理流程中发生的任何错误
+      return { content: [{ type: "text", text: `❌ 获取动态评论失败: ${error.message}` }] };
     }
   }
 
@@ -369,6 +485,66 @@ class BilibiliMCPServer {
   }
 
   /**
+   * 生成动态评论的 Markdown 格式报告。
+   * @param {object} pageInfo - B 站 API 返回的页面数据。
+   * @param {boolean} includeReplies - 是否包含楼中楼回复。
+   * @param {string} cookie - 用户 Cookie。
+   * @param {string} dynamicId - 动态 ID。
+   * @returns {Promise<string>} - 完整的 Markdown 报告。
+   */
+  async generateDynamicMarkdownResponse(pageInfo, includeReplies, cookie, dynamicId) {
+    const currentPage = pageInfo.page?.num || 1;
+    const totalCount = pageInfo.page?.count || 0;
+    const pageSize = pageInfo.page?.size || 20;
+    const totalPages = pageSize > 0 ? Math.ceil(totalCount / pageSize) : 1;
+
+    let md = `## 📱 B 站动态评论分析结果\n\n`;
+    md += `📄 **当前显示**: 第 ${currentPage} / ${totalPages} 页\n`;
+    md += `📊 **评论总数**: ${totalCount} 条\n\n`;
+
+    const allComments = [...(pageInfo.hots || []), ...(pageInfo.replies || [])];
+
+    if (allComments.length === 0) {
+      md += "😴 **此页面没有评论。**\n\n";
+      md += "✅ 分析完成。如果动态有更多评论，请尝试请求其他页面。";
+      return md;
+    }
+    
+    const limit = simplePool(5); // 并发控制器，同一时间最多发送 5 个请求
+
+    const replyTasks = includeReplies 
+      ? allComments.map(comment => {
+          if (comment.rcount > 0) {
+            return limit(() => this.bilibiliAPI.fetchReplies(dynamicId, comment.rpid, cookie, dynamicId));
+          }
+          return Promise.resolve([]);
+        })
+      : allComments.map(() => Promise.resolve([]));
+    
+    const allReplies = await Promise.all(replyTasks);
+
+    const commentWithReplies = allComments.map((comment, index) => ({
+      comment,
+      replies: allReplies[index] || []
+    }));
+
+    md += "### 💬 评论列表\n";
+    commentWithReplies.forEach(item => {
+        md += this.formatCommentWithReplies(item.comment, item.replies);
+    });
+
+    md += "---\n\n";
+    md += `✅ **成功加载第 ${currentPage} 页的评论。**\n`;
+    if (currentPage < totalPages) {
+      md += `💡 如需浏览下一页 (第 ${currentPage + 1} 页), 请在下次请求时指定 \`page: ${currentPage + 1}\`。`;
+    } else {
+      md += `🏁 已到达最后一页。`;
+    }
+
+    return md;
+  }
+
+  /**
    * 启动 MCP 服务器并监听传入的请求。
    */
   async run() {
@@ -376,7 +552,13 @@ class BilibiliMCPServer {
     await this.server.connect(transport);
     // 添加版本信息到启动日志
     console.error("🚀 Bilibili 评论工具已启动 (v1.0.0)");
-    console.error(`🔍 环境变量检查: BILIBILI_COOKIE - ${process.env.BILIBILI_COOKIE ? '✅ 已设置' : '❌ 未设置'}`);
+    console.error(`🔍 环境变量检查: BILIBILI_SESSDATA - ${process.env.BILIBILI_SESSDATA ? '✅ 已设置' : '❌ 未设置'}`);
+    
+    // 添加进程信号处理用于优雅关闭
+    process.on('SIGINT', async () => {
+      await this.server.close();
+      process.exit(0);
+    });
   }
 }
 

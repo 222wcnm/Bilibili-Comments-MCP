@@ -25,12 +25,19 @@ npm install @modelcontextprotocol/sdk axios
       "command": "node",
       "args": ["/path/to/bilibili_mcp.js"],
       "env": {
-        "BILIBILI_COOKIE": "your_bilibili_cookie_here"
+        "BILIBILI_SESSDATA": "your_bilibili_sessdata_here"
       }
     }
   }
 }
 ```
+
+## 环境变量
+
+### 配置方式
+- `BILIBILI_SESSDATA`：Bilibili Cookie 中的 SESSDATA 值。
+
+  - 获取方式：登录 Bilibili 网站，打开浏览器开发者工具 (F12)，在 Network (网络) 选项卡中刷新页面，找到任意一个 `bilibili.com` 的请求，在 Request Headers 中找到 Cookie，提取 `SESSDATA=xxx` 部分的值。
 
 ## 工具功能
 
