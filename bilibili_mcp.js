@@ -9,42 +9,9 @@ const {
   McpError
 } = require("@modelcontextprotocol/sdk/types.js");
 const axios = require("axios");
+const pLimit = require("p-limit");
 
 /**
- * 一个简单的异步任务并发控制器。
- * 用于替代外部依赖 `p-limit`，以保证代码的兼容性和独立性。
- * @param {number} concurrency - 最大并发执行数量。
- * @returns {function(function): Promise<any>} - 一个接收异步函数并进行调度的函数。
- */
-function simplePool(concurrency) {
-    const queue = [];
-    let activeCount = 0;
-
-    const runTask = (task) => {
-        activeCount++;
-        task.fn()
-            .then(res => task.resolve(res))
-            .catch(err => task.reject(err))
-            .finally(() => {
-                activeCount--;
-                processQueue();
-            });
-    };
-
-    const processQueue = () => {
-        if (activeCount < concurrency && queue.length > 0) {
-            const task = queue.shift();
-            runTask(task);
-        }
-    };
-
-    return (fn) => {
-        return new Promise((resolve, reject) => {
-            queue.push({ fn, resolve, reject });
-            processQueue();
-        });
-    };
-}
 
 
 /**
@@ -109,18 +76,27 @@ class BilibiliAPI {
    * @returns {Promise<import('axios').AxiosResponse<any, any>>} - axios 的原始响应对象。
    */
   async fetchComments(oid, page, pageSize, sort, cookie, videoId) {
-    try {
-      const response = await this.axiosInstance.get(this.apiEndpoints.reply, {
-        params: { type: 1, oid, pn: page, ps: Math.min(pageSize, 49), sort },
-        headers: {
-          "Cookie": cookie,
-          "Referer": `https://www.bilibili.com/video/${videoId}`,
-        },
-      });
-      return response;
-    } catch (error) {
-      if (error.code === 'ECONNABORTED') throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
-      throw new McpError(ErrorCode.InternalError, `获取主评论失败: ${error.message || "未知网络错误"}`);
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const response = await this.axiosInstance.get(this.apiEndpoints.reply, {
+          params: { type: 1, oid, pn: page, ps: Math.min(pageSize, 49), sort },
+          headers: {
+            "Cookie": cookie,
+            "Referer": `https://www.bilibili.com/video/${videoId}`,
+          },
+          timeout: 10000, // 10秒超时
+        });
+        return response;
+      } catch (error) {
+        retries--;
+        if (retries === 0) {
+          if (error.code === 'ECONNABORTED') throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
+          throw new McpError(ErrorCode.InternalError, `获取主评论失败: ${error.message || "未知网络错误"}`);
+        }
+        // 等待1秒后重试
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
   }
 
@@ -133,24 +109,32 @@ class BilibiliAPI {
    * @returns {Promise<Array<any>|'fetch_failed'>} - 回复数组；若失败则返回特定错误标识。
    */
   async fetchReplies(oid, parentRpid, cookie, videoId) {
-    try {
-      const response = await this.axiosInstance.get(this.apiEndpoints.replyReply, {
-        params: { type: 1, oid, root: parentRpid, ps: 10 }, // 固定获取前10条回复
-        headers: {
-          "Cookie": cookie,
-          "Referer": `https://www.bilibili.com/video/${videoId}`,
-        },
-        timeout: 8000,
-      });
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const response = await this.axiosInstance.get(this.apiEndpoints.replyReply, {
+          params: { type: 1, oid, root: parentRpid, ps: 10 }, // 固定获取前10条回复
+          headers: {
+            "Cookie": cookie,
+            "Referer": `https://www.bilibili.com/video/${videoId}`,
+          },
+          timeout: 8000,
+        });
 
-      if (response.data.code === 0 && response.data.data?.replies) {
-        return response.data.data.replies;
+        if (response.data.code === 0 && response.data.data?.replies) {
+          return response.data.data.replies;
+        }
+        return []; // API 成功但没有回复，返回空数组
+      } catch (error) {
+        retries--;
+        if (retries === 0) {
+          // 捕获任何错误（网络、超时等），返回一个特定标识以便上层处理
+          console.error(`获取楼中楼失败 (rpid: ${parentRpid}):`, error.message);
+          return 'fetch_failed';
+        }
+        // 等待1秒后重试
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      return []; // API 成功但没有回复，返回空数组
-    } catch (error) {
-      // 捕获任何错误（网络、超时等），返回一个特定标识以便上层处理
-      console.error(`获取楼中楼失败 (rpid: ${parentRpid}):`, error.message);
-      return 'fetch_failed';
     }
   }
 
@@ -163,18 +147,27 @@ class BilibiliAPI {
    * @returns {Promise<import('axios').AxiosResponse<any, any>>} - axios 的原始响应对象。
    */
   async fetchDynamicComments(dynamicId, page, pageSize, cookie) {
-    try {
-      const response = await this.axiosInstance.get(this.apiEndpoints.dynamicReply, {
-        params: { type: 17, oid: dynamicId, pn: page, ps: Math.min(pageSize, 49) },
-        headers: {
-          "Cookie": cookie,
-          "Referer": `https://t.bilibili.com/${dynamicId}`,
-        },
-      });
-      return response;
-    } catch (error) {
-      if (error.code === 'ECONNABORTED') throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
-      throw new McpError(ErrorCode.InternalError, `获取动态评论失败: ${error.message || "未知网络错误"}`);
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const response = await this.axiosInstance.get(this.apiEndpoints.dynamicReply, {
+          params: { type: 17, oid: dynamicId, pn: page, ps: Math.min(pageSize, 49) },
+          headers: {
+            "Cookie": cookie,
+            "Referer": `https://t.bilibili.com/${dynamicId}`,
+          },
+          timeout: 10000, // 10秒超时
+        });
+        return response;
+      } catch (error) {
+        retries--;
+        if (retries === 0) {
+          if (error.code === 'ECONNABORTED') throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
+          throw new McpError(ErrorCode.InternalError, `获取动态评论失败: ${error.message || "未知网络错误"}`);
+        }
+        // 等待1秒后重试
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
   }
 }
@@ -216,6 +209,7 @@ class BilibiliMCPServer {
               pageSize: { type: "number", default: 20, description: "每页数量，范围 1-49，默认 20" },
               sort: { type: "number", default: 0, description: "排序方式: 0 按时间，1 按热度" },
               includeReplies: { type: "boolean", default: true, description: "是否包含楼中楼回复" },
+              outputFormat: { type: "string", default: "markdown", description: "输出格式: markdown 或 json" },
               cookie: { type: "string", description: "B 站 Cookie（可选）。如果已设置环境变量，则无需提供。" }
             },
           }
@@ -229,6 +223,7 @@ class BilibiliMCPServer {
               page: { type: "number", default: 1, description: "页码，默认为 1" },
               pageSize: { type: "number", default: 20, description: "每页数量，范围 1-49，默认 20" },
               includeReplies: { type: "boolean", default: true, description: "是否包含楼中楼回复" },
+              outputFormat: { type: "string", default: "markdown", description: "输出格式: markdown 或 json" },
               cookie: { type: "string", description: "B 站 Cookie（可选）。如果已设置环境变量，则无需提供。" }
             },
             required: ["dynamic_id"]
@@ -295,7 +290,7 @@ class BilibiliMCPServer {
   async getVideoComments(args) {
     try {
       // 1. 参数校验与准备
-      const { bvid, aid, page = 1, pageSize = 20, sort = 0, includeReplies = true } = args;
+      const { bvid, aid, page = 1, pageSize = 20, sort = 0, includeReplies = true, outputFormat = "markdown" } = args;
       const cookie = this.getValidCookie(args.cookie);
 
       if (!cookie) {
@@ -304,6 +299,7 @@ class BilibiliMCPServer {
       if (!bvid && !aid) throw new McpError(ErrorCode.InvalidParams, "必须提供 bvid 或 aid 之一");
       if (pageSize < 1 || pageSize > 49) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-49 之间");
       if (![0, 1].includes(sort)) throw new McpError(ErrorCode.InvalidParams, "sort 必须是 0 或 1");
+      if (!["markdown", "json"].includes(outputFormat)) throw new McpError(ErrorCode.InvalidParams, "outputFormat 必须是 markdown 或 json");
 
       // 2. 获取评论数据
       const videoIdForRef = bvid || `av${aid}`;
@@ -324,16 +320,27 @@ class BilibiliMCPServer {
         throw new McpError(ErrorCode.InternalError, `B 站 API 错误 (${response.data.code}): ${errorMsg}`);
       }
 
-      // 3. 将数据格式化为 Markdown 报告
-      const markdownResponse = await this.generateMarkdownResponse(
-        response.data.data, 
-        includeReplies, 
-        cookie, 
-        videoIdForRef,
-        oid
-      );
-
-      return { content: [{ type: "text", text: markdownResponse }] };
+      // 3. 根据输出格式返回相应数据
+      if (outputFormat === "json") {
+        const jsonResponse = await this.generateJsonResponse(
+          response.data.data, 
+          includeReplies, 
+          cookie, 
+          videoIdForRef,
+          oid
+        );
+        return { content: [{ type: "text", text: JSON.stringify(jsonResponse, null, 2) }] };
+      } else {
+        // 3. 将数据格式化为 Markdown 报告
+        const markdownResponse = await this.generateMarkdownResponse(
+          response.data.data, 
+          includeReplies, 
+          cookie, 
+          videoIdForRef,
+          oid
+        );
+        return { content: [{ type: "text", text: markdownResponse }] };
+      }
     } catch (error) {
       // 统一处理流程中发生的任何错误
       return { content: [{ type: "text", text: `❌ 获取评论失败: ${error.message}` }] };
@@ -348,7 +355,7 @@ class BilibiliMCPServer {
   async getDynamicComments(args) {
     try {
       // 1. 参数校验与准备
-      const { dynamic_id, page = 1, pageSize = 20, includeReplies = true } = args;
+      const { dynamic_id, page = 1, pageSize = 20, includeReplies = true, outputFormat = "markdown" } = args;
       const cookie = this.getValidCookie(args.cookie);
 
       if (!cookie) {
@@ -356,6 +363,7 @@ class BilibiliMCPServer {
       }
       if (!dynamic_id) throw new McpError(ErrorCode.InvalidParams, "必须提供 dynamic_id");
       if (pageSize < 1 || pageSize > 49) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-49 之间");
+      if (!["markdown", "json"].includes(outputFormat)) throw new McpError(ErrorCode.InvalidParams, "outputFormat 必须是 markdown 或 json");
 
       // 2. 获取评论数据
       const response = await this.bilibiliAPI.fetchDynamicComments(dynamic_id, page, pageSize, cookie);
@@ -368,15 +376,26 @@ class BilibiliMCPServer {
         throw new McpError(ErrorCode.InternalError, `B 站 API 错误 (${response.data.code}): ${errorMsg}`);
       }
 
-      // 3. 将数据格式化为 Markdown 报告
-      const markdownResponse = await this.generateDynamicMarkdownResponse(
-        response.data.data, 
-        includeReplies, 
-        cookie, 
-        dynamic_id
-      );
-
-      return { content: [{ type: "text", text: markdownResponse }] };
+      // 3. 根据输出格式返回相应数据
+      if (outputFormat === "json") {
+        const jsonResponse = await this.generateJsonResponse(
+          response.data.data, 
+          includeReplies, 
+          cookie, 
+          dynamic_id,
+          dynamic_id // 对于动态，oid 参数使用 dynamic_id
+        );
+        return { content: [{ type: "text", text: JSON.stringify(jsonResponse, null, 2) }] };
+      } else {
+        // 3. 将数据格式化为 Markdown 报告
+        const markdownResponse = await this.generateDynamicMarkdownResponse(
+          response.data.data, 
+          includeReplies, 
+          cookie, 
+          dynamic_id
+        );
+        return { content: [{ type: "text", text: markdownResponse }] };
+      }
     } catch (error) {
       // 统一处理流程中发生的任何错误
       return { content: [{ type: "text", text: `❌ 获取动态评论失败: ${error.message}` }] };
@@ -424,7 +443,7 @@ class BilibiliMCPServer {
       return md;
     }
     
-    const limit = simplePool(5); // 并发控制器，同一时间最多发送 5 个请求
+    const limit = pLimit(10); // 使用 p-limit 进行并发控制，最多同时发送 10 个请求
 
     const replyTasks = includeReplies 
       ? allComments.map(comment => {
@@ -456,6 +475,77 @@ class BilibiliMCPServer {
     }
 
     return md;
+  }
+
+  /**
+   * 生成包含JSON格式的报告
+   * @param {object} pageInfo - B 站 API 返回的页面数据。
+   * @param {boolean} includeReplies - 是否包含楼中楼回复。
+   * @param {string} cookie - 用户 Cookie。
+   * @param {string} videoId - 视频 ID。
+   * @param {number} oid - 视频 aid。
+   * @returns {Promise<object>} - 包含原始数据和格式化数据的对象
+   */
+  async generateJsonResponse(pageInfo, includeReplies, cookie, videoId, oid) {
+    const currentPage = pageInfo.page?.num || 1;
+    const totalCount = pageInfo.page?.count || 0;
+    const pageSize = pageInfo.page?.size || 20;
+    const totalPages = pageSize > 0 ? Math.ceil(totalCount / pageSize) : 1;
+
+    const allComments = [...(pageInfo.hots || []), ...(pageInfo.replies || [])];
+
+    // 获取楼中楼回复
+    const limit = pLimit(10);
+    const replyTasks = includeReplies 
+      ? allComments.map(comment => {
+          if (comment.rcount > 0) {
+            return limit(() => this.bilibiliAPI.fetchReplies(oid, comment.rpid, cookie, videoId));
+          }
+          return Promise.resolve([]);
+        })
+      : allComments.map(() => Promise.resolve([]));
+    
+    const allReplies = await Promise.all(replyTasks);
+
+    // 构建完整的评论数据结构
+    const commentsWithReplies = allComments.map((comment, index) => ({
+      comment: {
+        id: comment.rpid,
+        user: {
+          name: comment.member.uname,
+          level: comment.member.level_info?.current_level || 0,
+          sex: comment.member.sex || 'unknown'
+        },
+        content: comment.content.message,
+        like: comment.like,
+        time: comment.ctime,
+        replyCount: comment.rcount,
+        location: comment.reply_control?.location?.replace('IP属地：', '') || '未知'
+      },
+      replies: Array.isArray(allReplies[index]) ? allReplies[index].map(reply => ({
+        id: reply.rpid,
+        user: {
+          name: reply.member.uname,
+          level: reply.member.level_info?.current_level || 0,
+          sex: reply.member.sex || 'unknown'
+        },
+        content: reply.content.message,
+        like: reply.like,
+        time: reply.ctime
+      })) : []
+    }));
+
+    return {
+      metadata: {
+        currentPage,
+        totalPages,
+        totalCount,
+        pageSize,
+        hasNextPage: currentPage < totalPages,
+        hasPrevPage: currentPage > 1
+      },
+      comments: commentsWithReplies
+    };
   }
 
   /**
@@ -510,7 +600,7 @@ class BilibiliMCPServer {
       return md;
     }
     
-    const limit = simplePool(5); // 并发控制器，同一时间最多发送 5 个请求
+    const limit = pLimit(10); // 使用 p-limit 进行并发控制，最多同时发送 10 个请求
 
     const replyTasks = includeReplies 
       ? allComments.map(comment => {

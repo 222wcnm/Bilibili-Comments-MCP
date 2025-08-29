@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.14.0",
-    "axios": "^1.10.0"
+    "axios": "^1.10.0",
+    "p-limit": "^7.1.1"
   }
 }
