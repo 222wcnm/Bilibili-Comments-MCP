@@ -150,6 +150,9 @@ class BilibiliAPI {
     let retries = 3;
     while (retries > 0) {
       try {
+        console.log(`[DEBUG] 请求动态评论: dynamicId=${dynamicId}, page=${page}, pageSize=${pageSize}`);
+        console.log(`[DEBUG] 请求参数: type=17, oid=${dynamicId}, pn=${page}, ps=${Math.min(pageSize, 49)}`);
+        
         const response = await this.axiosInstance.get(this.apiEndpoints.dynamicReply, {
           params: { type: 17, oid: dynamicId, pn: page, ps: Math.min(pageSize, 49) },
           headers: {
@@ -158,11 +161,24 @@ class BilibiliAPI {
           },
           timeout: 10000, // 10秒超时
         });
+        
+        console.log(`[DEBUG] 动态评论API响应: code=${response.data.code}, message=${response.data.message}`);
+        console.log(`[DEBUG] 完整响应数据:`, JSON.stringify(response.data, null, 2));
+        
         return response;
       } catch (error) {
         retries--;
+        console.error(`[ERROR] 获取动态评论失败 (尝试 ${4-retries}/3):`, error.message);
+        console.error(`[ERROR] 完整错误信息:`, error);
+        
         if (retries === 0) {
-          if (error.code === 'ECONNABORTED') throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
+          if (error.code === 'ECONNABORTED') {
+            throw new McpError(ErrorCode.InternalError, "请求超时，请稍后重试");
+          }
+          if (error.response) {
+            console.error(`[ERROR] HTTP状态码: ${error.response.status}`);
+            console.error(`[ERROR] 响应数据:`, error.response.data);
+          }
           throw new McpError(ErrorCode.InternalError, `获取动态评论失败: ${error.message || "未知网络错误"}`);
         }
         // 等待1秒后重试
@@ -348,6 +364,16 @@ class BilibiliMCPServer {
   }
 
   /**
+   * 验证动态ID格式
+   * @param {string} dynamicId - 动态ID
+   * @returns {boolean} 是否为有效格式
+   */
+  validateDynamicId(dynamicId) {
+    // 动态ID应该是数字字符串
+    return dynamicId && typeof dynamicId === 'string' && /^\d+$/.test(dynamicId) && dynamicId.length >= 10;
+  }
+
+  /**
    * `get_dynamic_comments` 工具的核心执行函数。
    * @param {object} args - 从 LLM 客户端传来的参数。
    * @returns {Promise<{content: [{type: string, text: string}]}>} - MCP 格式的返回结果。
@@ -362,17 +388,27 @@ class BilibiliMCPServer {
         throw new McpError(ErrorCode.InvalidParams, "必须提供有效的 B 站 Cookie。请通过参数传入或设置 BILIBILI_SESSDATA 环境变量。");
       }
       if (!dynamic_id) throw new McpError(ErrorCode.InvalidParams, "必须提供 dynamic_id");
+      if (!this.validateDynamicId(dynamic_id)) {
+        throw new McpError(ErrorCode.InvalidParams, `无效的 dynamic_id 格式: ${dynamic_id}。动态ID应该是长数字字符串。`);
+      }
       if (pageSize < 1 || pageSize > 20) throw new McpError(ErrorCode.InvalidParams, "pageSize 必须在 1-20 之间");
+      if (page < 1) throw new McpError(ErrorCode.InvalidParams, "page 必须大于等于1");
       if (!["markdown", "json"].includes(outputFormat)) throw new McpError(ErrorCode.InvalidParams, "outputFormat 必须是 markdown 或 json");
+
+      console.log(`[DEBUG] 开始获取动态评论: dynamic_id=${dynamic_id}, page=${page}, pageSize=${pageSize}`);
 
       // 2. 获取评论数据
       const response = await this.bilibiliAPI.fetchDynamicComments(dynamic_id, page, pageSize, cookie);
+      
+      console.log(`[DEBUG] 动态评论API响应: code=${response.data.code}, message=${response.data.message}`);
       
       if (response.data.code !== 0) {
         let errorMsg = response.data.message;
         if (response.data.code === -101) errorMsg = "账号未登录或 Cookie 已过期";
         else if (response.data.code === -403) errorMsg = "访问权限不足";
-        else if (response.data.code === -404) errorMsg = "动态不存在或已被删除";
+        else if (response.data.code === -404) errorMsg = "动态不存在或已被删除。请检查 dynamic_id 是否正确，或该动态可能已被作者删除。";
+        else if (response.data.code === -500) errorMsg = "服务器内部错误，请稍后重试";
+        else if (response.data.code === 65531) errorMsg = "接口已下线或参数错误";
         throw new McpError(ErrorCode.InternalError, `B 站 API 错误 (${response.data.code}): ${errorMsg}`);
       }
 
@@ -398,6 +434,7 @@ class BilibiliMCPServer {
       }
     } catch (error) {
       // 统一处理流程中发生的任何错误
+      console.error(`[ERROR] 获取动态评论失败:`, error);
       return { content: [{ type: "text", text: `❌ 获取动态评论失败: ${error.message}` }] };
     }
   }

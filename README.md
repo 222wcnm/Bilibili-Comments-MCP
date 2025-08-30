@@ -106,3 +106,18 @@ npm install @modelcontextprotocol/sdk axios
 3. 切换到 Network 标签
 4. 刷新页面，找到任意请求
 5. 复制 Request Headers 中的 Cookie 值
+
+## 动态ID获取方法
+
+1. 在B站手机App中打开想要获取评论的动态
+2. 点击分享按钮
+3. 选择"复制链接"
+4. 链接格式通常为：`https://t.bilibili.com/动态ID`
+5. 提取链接中的数字部分作为dynamic_id参数
+
+## 常见问题解决
+
+### 动态评论获取失败
+- **错误代码-404**: 动态不存在或已被删除，请检查dynamic_id是否正确
+- **错误代码-101**: Cookie已过期，请重新获取并更新SESSDATA
+- **错误代码-403**: 访问权限不足，某些动态可能需要登录才能查看评论
