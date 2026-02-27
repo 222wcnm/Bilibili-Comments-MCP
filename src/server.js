@@ -6,11 +6,13 @@ import {
     ErrorCode,
     McpError
 } from "@modelcontextprotocol/sdk/types.js";
+import { createRequire } from 'node:module';
 import { BilibiliAPI } from './api.js';
 import { getVideoComments } from './tools/video.js';
 import { getDynamicComments } from './tools/dynamic.js';
 
-const VERSION = '2.0.0';
+const require = createRequire(import.meta.url);
+const { version: VERSION } = require('../package.json');
 
 /**
  * @class BilibiliMCPServer

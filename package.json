@@ -14,7 +14,15 @@
     "bilibili",
     "claude"
   ],
-  "author": "",
+  "author": "222wcnm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/222wcnm/Bilibili-Comments-MCP.git"
+  },
+  "homepage": "https://github.com/222wcnm/Bilibili-Comments-MCP#readme",
+  "bugs": {
+    "url": "https://github.com/222wcnm/Bilibili-Comments-MCP/issues"
+  },
   "scripts": {
     "start": "node src/index.js",
     "test": "vitest run",
